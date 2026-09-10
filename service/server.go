@@ -1,7 +1,9 @@
 package service
 
 import (
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"runtime"
 	"strconv"
@@ -212,6 +214,8 @@ func (s *ServerService) GenKeypair(keyType string, options string) []string {
 		return s.generateRealityKeyPair()
 	case "wireguard":
 		return s.generateWireGuardKey(options)
+	case "openvpn":
+		return s.generateOpenVPNStaticKey()
 	}
 
 	return []string{"Failed to generate keypair"}
@@ -231,6 +235,29 @@ func (s *ServerService) generateTLSKeyPair(serverName string) []string {
 		return []string{"Failed to generate TLS keypair: ", err.Error()}
 	}
 	return append(strings.Split(string(privateKeyPem), "\n"), strings.Split(string(publicKeyPem), "\n")...)
+}
+
+// generateOpenVPNStaticKey produces what `openvpn --genkey secret` writes: 256
+// random bytes as hex between OpenVPN's own markers. tls-auth and tls-crypt
+// take one of these rather than a PEM, and both ends of a tunnel have to carry
+// the same one.
+func (s *ServerService) generateOpenVPNStaticKey() []string {
+	material := make([]byte, 256)
+	if _, err := rand.Read(material); err != nil {
+		return []string{"Failed to generate OpenVPN static key: ", err.Error()}
+	}
+	encoded := hex.EncodeToString(material)
+
+	lines := []string{
+		"#",
+		"# 2048 bit OpenVPN static key",
+		"#",
+		"-----BEGIN OpenVPN Static key V1-----",
+	}
+	for offset := 0; offset < len(encoded); offset += 32 {
+		lines = append(lines, encoded[offset:offset+32])
+	}
+	return append(lines, "-----END OpenVPN Static key V1-----")
 }
 
 func (s *ServerService) generateRealityKeyPair() []string {

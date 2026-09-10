@@ -69,6 +69,7 @@ var defaultValueMap = map[string]string{
 	"subClashNoDefGrp":   "false",
 	"subClashSprtAll":    "false",
 	"subClashUdp":        "false",
+	"maintenance":        "false",
 	"globalReset":        "",
 	"globalResetLast":    "0",
 	"config":             defaultConfig,
@@ -417,6 +418,14 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) error {
 		return err
 	}
 	for key, obj := range settings {
+		// maintenance has an action of its own, which stops or starts the core
+		// alongside writing the flag. Letting it through here would leave the
+		// two disagreeing: the flag set with the core still serving clients, or
+		// cleared with the core still down.
+		if key == "maintenance" {
+			continue
+		}
+
 		// Ignore accidental surrounding whitespace while preserving spaces
 		// inside values such as certificate paths and URLs.
 		obj = normalizeSettingValue(obj)
@@ -485,6 +494,17 @@ func (s *SettingService) GetSubClashSprtAll() (bool, error) {
 // without it VLESS/VMess/Trojan/... nodes reach the client with UDP off.
 func (s *SettingService) GetSubClashUdp() (bool, error) {
 	return s.getBool("subClashUdp")
+}
+
+// GetMaintenance reports whether the operator has taken the core out of
+// service. It is stored rather than held in memory so a reboot in the middle of
+// maintenance does not quietly put users back online.
+func (s *SettingService) GetMaintenance() (bool, error) {
+	return s.getBool("maintenance")
+}
+
+func (s *SettingService) SetMaintenance(enabled bool) error {
+	return s.setString("maintenance", strconv.FormatBool(enabled))
 }
 
 func (s *SettingService) fileExists(path string) error {

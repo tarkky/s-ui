@@ -86,6 +86,21 @@ func (j *JsonService) GetJson(subId string, format string) (*string, []string, e
 	return &resultStr, headers, nil
 }
 
+// uniqueOutboundTag keeps a name as the operator wrote it, falling back to a
+// numbered suffix only when that name is already in use. sing-box and clash
+// both reject duplicate tags.
+func uniqueOutboundTag(tag string, taken map[string]bool) string {
+	if !taken[tag] {
+		return tag
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", tag, i)
+		if !taken[candidate] {
+			return candidate
+		}
+	}
+}
+
 func (j *JsonService) getData(subId string) (*model.Client, []*model.Inbound, error) {
 	db := database.GetDB()
 	client := &model.Client{}
@@ -110,6 +125,7 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 	var outbounds []map[string]interface{}
 	var configs map[string]interface{}
 	var outTags []string
+	takenTags := make(map[string]bool)
 
 	err := json.Unmarshal(clientConfig, &configs)
 	if err != nil {
@@ -171,6 +187,7 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 		tag, _ := outbound["tag"].(string)
 		if len(addrs) == 0 {
 			tag = util.JoinRemark(clientRemark, tag)
+			takenTags[tag] = true
 			outbound["tag"] = tag
 			// For mixed protocol, use separated socks and http
 			if protocol == "mixed" {
@@ -180,7 +197,7 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 				outbounds = append(outbounds, outbound)
 			}
 		} else {
-			for index, addr := range addrs {
+			for _, addr := range addrs {
 				// Copy original config
 				newOut := make(map[string]interface{}, len(outbound))
 				for key, value := range outbound {
@@ -205,7 +222,12 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 				}
 
 				remark, _ := addr["remark"].(string)
-				newTag := fmt.Sprintf("%d.%s", index+1, util.JoinRemark(clientRemark, tag+remark))
+				// Multiple addresses share one inbound tag, so the name only
+				// needs disambiguating when the addresses don't already carry
+				// distinct remarks. Numbering every one of them renamed nodes
+				// that had no conflict to begin with.
+				newTag := uniqueOutboundTag(util.JoinRemark(clientRemark, tag+remark), takenTags)
+				takenTags[newTag] = true
 				newOut["tag"] = newTag
 				// For mixed protocol, use separated socks and http
 				if protocol == "mixed" {

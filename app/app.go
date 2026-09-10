@@ -89,9 +89,15 @@ func (a *APP) Start() error {
 		return err
 	}
 
-	err = a.configService.StartCore()
-	if err != nil {
-		logger.Error(err)
+	// StartCore does nothing while maintenance is on, so say why rather than
+	// leave the operator looking at a panel that came up with no core.
+	if maintenance, mErr := a.SettingService.GetMaintenance(); mErr == nil && maintenance {
+		logger.Warning("maintenance mode is on: core not started, clients cannot connect")
+	} else {
+		err = a.configService.StartCore()
+		if err != nil {
+			logger.Error(err)
+		}
 	}
 
 	return nil

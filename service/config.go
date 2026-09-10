@@ -202,7 +202,26 @@ func isEmptyRawJSON(raw json.RawMessage) bool {
 	return false
 }
 
+// inMaintenance reports whether the operator has asked for the core to stay
+// stopped. It is checked here rather than at each caller because five different
+// paths start the core -- boot, the five-second watchdog, every config save,
+// the scheduled traffic reset and a base config change -- and a maintenance
+// mode that any one of them could undo would not be one.
+func (s *ConfigService) inMaintenance() bool {
+	maintenance, err := s.SettingService.GetMaintenance()
+	if err != nil {
+		logger.Warning("unable to read maintenance setting, assuming off:", err)
+		return false
+	}
+	return maintenance
+}
+
 func (s *ConfigService) StartCore() error {
+	// Checked before anything touches the core, so the five-second watchdog
+	// stops at this line while maintenance is on.
+	if s.inMaintenance() {
+		return nil
+	}
 	if corePtr.IsRunning() {
 		return nil
 	}
@@ -242,6 +261,9 @@ func (s *ConfigService) StartCore() error {
 }
 
 func (s *ConfigService) RestartCore() error {
+	if s.inMaintenance() {
+		return common.NewError("core is stopped for maintenance")
+	}
 	err := s.StopCore()
 	if err != nil {
 		return err
@@ -250,6 +272,11 @@ func (s *ConfigService) RestartCore() error {
 }
 
 func (s *ConfigService) restartCoreWithConfig(config json.RawMessage) error {
+	if s.inMaintenance() {
+		// The config is saved either way; it takes effect when the core is
+		// started again.
+		return nil
+	}
 	startCoreMu.Lock()
 	if startCoreInProgress {
 		startCoreMu.Unlock()
@@ -280,6 +307,24 @@ func (s *ConfigService) restartCoreWithConfig(config json.RawMessage) error {
 	}
 	logger.Info("sing-box restarted with new config")
 	return nil
+}
+
+// SetMaintenance takes the core out of service, or puts it back. The setting is
+// written first, so the watchdog cannot race in and restart what was just
+// stopped.
+func (s *ConfigService) SetMaintenance(enabled bool) error {
+	if err := s.SettingService.SetMaintenance(enabled); err != nil {
+		return err
+	}
+	if enabled {
+		if !corePtr.IsRunning() {
+			return nil
+		}
+		logger.Warning("maintenance mode on: stopping core, clients cannot connect until it is turned off")
+		return s.StopCore()
+	}
+	logger.Info("maintenance mode off: starting core")
+	return s.StartCore()
 }
 
 func (s *ConfigService) StopCore() error {

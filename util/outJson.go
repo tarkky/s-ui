@@ -109,6 +109,11 @@ func addTls(out *map[string]interface{}, tls *model.Tls) {
 	if cipherSuites, ok := tlsServer["cipher_suites"]; ok {
 		tlsConfig["cipher_suites"] = cipherSuites
 	}
+	// Both sides of the handshake are given the same limit, as with the
+	// versions and cipher suites above.
+	if handshakeTimeout, ok := tlsServer["handshake_timeout"]; ok {
+		tlsConfig["handshake_timeout"] = handshakeTimeout
+	}
 	if reality, ok := tlsServer["reality"].(map[string]interface{}); ok && reality["enabled"].(bool) {
 		realityConfig := tlsConfig["reality"].(map[string]interface{})
 		realityConfig["enabled"] = true
