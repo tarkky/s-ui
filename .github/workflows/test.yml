@@ -1,0 +1,62 @@
+name: Test
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/test.yml'
+      - 'build-tags.sh'
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: Check formatting
+        run: |
+          set -e
+          unformatted=$(gofmt -l . | grep -v '^frontend/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # Built with the release tags so the tests exercise the protocols a
+      # release actually ships. Without them sing-box swaps in the stubs from
+      # core/register_*_stub.go and the compat tests skip instead of running.
+      - name: Test
+        run: |
+          set -e
+          . ./build-tags.sh
+          go test -tags "$BUILD_TAGS" ./...
+
+      # Race detection is scoped to the packages that are clean today, so the
+      # job fails on a race this repo introduces rather than on the known
+      # upstream one in sing-box's route.NetworkManager.
+      - name: Test with race detector
+        run: |
+          set -e
+          . ./build-tags.sh
+          go test -race -tags "$BUILD_TAGS" ./service/... ./sub/... ./database/... ./util/... ./logger/...
